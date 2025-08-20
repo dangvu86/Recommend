@@ -16,7 +16,11 @@ def to_excel(dfs_dict):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         for sheet_name, df in dfs_dict.items():
-            df.to_excel(writer, sheet_name=sheet_name, index=False)
+            # Nếu df là Styler object, lấy data ra
+            if hasattr(df, 'data'):
+                df.data.to_excel(writer, sheet_name=sheet_name, index=False)
+            else:
+                df.to_excel(writer, sheet_name=sheet_name, index=False)
     processed_data = output.getvalue()
     return processed_data
 
@@ -24,32 +28,30 @@ def convert_gdrive_link(gdrive_url):
     """
     Chuyển đổi link chia sẻ Google Drive (file hoặc sheet) thành link tải trực tiếp.
     """
-    # Kiểm tra định dạng link của Google Sheet
     sheet_match = re.search(r'/spreadsheets/d/([a-zA-Z0-9_-]+)', gdrive_url)
     if sheet_match:
         sheet_id = sheet_match.group(1)
         return f'https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=xlsx'
 
-    # Kiểm tra định dạng link của file thông thường (Excel, Word, etc.)
     file_match = re.search(r'/file/d/([a-zA-Z0-9_-]+)', gdrive_url)
     if file_match:
         file_id = file_match.group(1)
         return f'https://drive.google.com/uc?export=download&id={file_id}'
         
-    # Trả về None nếu không có định dạng nào khớp
     return None
 
 def add_performance_cols(df, prices_pivot, date_col_name):
     """
-    Thêm các cột hiệu suất vào DataFrame kết quả.
+    Thêm các cột hiệu suất và rating vào DataFrame kết quả.
     """
     if df.empty or prices_pivot.empty:
         df['Hiệu suất CP (6T)'] = 'N/A'
         df['Hiệu suất VNINDEX (6T)'] = 'N/A'
+        df['vs VNINDEX (6T)'] = 'N/A'
+        df['Rating'] = 'N/A'
         return df
 
-    stock_perfs = []
-    vnindex_perfs = []
+    stock_perfs, vnindex_perfs, vs_vnindex_perfs, ratings = [], [], [], []
     vnindex_ticker = 'VNINDEX Index'
 
     for _, row in df.iterrows():
@@ -62,31 +64,42 @@ def add_performance_cols(df, prices_pivot, date_col_name):
                 raise KeyError(f"Không tìm thấy mã {stock} hoặc {vnindex_ticker} trong dữ liệu giá.")
 
             start_prices_slice = prices_pivot.loc[start_date:].dropna(subset=[stock, vnindex_ticker])
-            if start_prices_slice.empty:
-                raise IndexError("Ngày bắt đầu nằm ngoài phạm vi dữ liệu giá.")
+            if start_prices_slice.empty: raise IndexError("Ngày bắt đầu nằm ngoài phạm vi.")
             
             start_price_stock = start_prices_slice[stock].iloc[0]
             start_price_vnindex = start_prices_slice[vnindex_ticker].iloc[0]
 
             end_prices_slice = prices_pivot.loc[:end_date].dropna(subset=[stock, vnindex_ticker])
-            if end_prices_slice.empty:
-                raise IndexError("Ngày kết thúc nằm ngoài phạm vi dữ liệu giá.")
+            if end_prices_slice.empty: raise IndexError("Ngày kết thúc nằm ngoài phạm vi.")
                 
             end_price_stock = end_prices_slice[stock].iloc[-1]
             end_price_vnindex = end_prices_slice[vnindex_ticker].iloc[-1]
 
-            stock_perf = (end_price_stock / start_price_stock) - 1
-            vnindex_perf = (end_price_vnindex / start_price_vnindex) - 1
+            stock_perf_num = (end_price_stock / start_price_stock) - 1
+            vnindex_perf_num = (end_price_vnindex / start_price_vnindex) - 1
+            vs_vnindex_perf_num = stock_perf_num - vnindex_perf_num
             
-            stock_perfs.append(f"{stock_perf:.2%}")
-            vnindex_perfs.append(f"{vnindex_perf:.2%}")
+            stock_perfs.append(f"{stock_perf_num:.2%}")
+            vnindex_perfs.append(f"{vnindex_perf_num:.2%}")
+            vs_vnindex_perfs.append(f"{vs_vnindex_perf_num:.2%}")
+
+            if vs_vnindex_perf_num > 0:
+                ratings.append('Outperform')
+            elif vs_vnindex_perf_num < 0:
+                ratings.append('Underperform')
+            else: 
+                ratings.append('N/A')
 
         except (KeyError, IndexError, ValueError):
             stock_perfs.append('N/A')
             vnindex_perfs.append('N/A')
+            vs_vnindex_perfs.append('N/A')
+            ratings.append('N/A')
 
     df['Hiệu suất CP (6T)'] = stock_perfs
     df['Hiệu suất VNINDEX (6T)'] = vnindex_perfs
+    df['vs VNINDEX (6T)'] = vs_vnindex_perfs
+    df['Rating'] = ratings
     return df
 
 def process_stock_data(df_rec, df_price):
@@ -140,6 +153,63 @@ def process_stock_data(df_rec, df_price):
 
     return df_list1, df_list2, df_list3, df_list4
 
+def calculate_win_rate_summary(df1, df2, df3, df4):
+    """
+    Tạo bảng thống kê Win Rate theo năm.
+    """
+    # Làm việc trên bản sao để không ảnh hưởng đến DataFrame gốc
+    dfs = {
+        'OUTPERFORM sang MARKET-PERFORM': (df1.copy(), 'Ngày thay đổi'),
+        'MARKET-PERFORM sang OUTPERFORM': (df2.copy(), 'Ngày thay đổi'),
+        'Khuyến nghị BUY': (df3.copy(), 'Ngày khuyến nghị'),
+        'Khuyến nghị UNDER-PERFORM': (df4.copy(), 'Ngày khuyến nghị')
+    }
+
+    all_years = set()
+    for _, (df, date_col) in dfs.items():
+        if not df.empty and date_col in df.columns:
+            df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+            valid_dates = df.dropna(subset=[date_col])
+            if not valid_dates.empty:
+                all_years.update(valid_dates[date_col].dt.year.unique())
+
+    if not all_years:
+        return pd.DataFrame()
+
+    years = sorted(list(all_years))
+    summary_data = {}
+
+    for col_name, (df, date_col) in dfs.items():
+        win_rates = []
+        if not df.empty and 'Rating' in df.columns:
+            df_filtered = df[df['Rating'] != 'N/A'].copy()
+            df_filtered['Year'] = pd.to_datetime(df_filtered[date_col]).dt.year
+
+            for year in years:
+                year_df = df_filtered[df_filtered['Year'] == year]
+                total_cases = len(year_df)
+                if total_cases > 0:
+                    win_cases = len(year_df[year_df['Rating'] == 'Outperform'])
+                    win_rate = win_cases / total_cases
+                    win_rates.append(f"{win_rate:.2%}")
+                else:
+                    win_rates.append('N/A')
+            
+            total_all_time = len(df_filtered)
+            if total_all_time > 0:
+                win_all_time = len(df_filtered[df_filtered['Rating'] == 'Outperform'])
+                total_win_rate = win_all_time / total_all_time
+                win_rates.append(f"{total_win_rate:.2%}")
+            else:
+                win_rates.append('N/A')
+            summary_data[col_name] = win_rates
+        else:
+            summary_data[col_name] = ['N/A'] * (len(years) + 1)
+
+    summary_df = pd.DataFrame(summary_data, index=[str(y) for y in years] + ['Total'])
+    summary_df.index.name = 'Win Rate'
+    return summary_df.reset_index()
+
 def run_analysis(gdrive_url):
     """
     Hàm chính để chạy toàn bộ quy trình phân tích.
@@ -162,25 +232,63 @@ def run_analysis(gdrive_url):
                 
                 df_list1, df_list2, df_list3, df_list4 = process_stock_data(df_rec, df_price)
 
+                # --- Định dạng bảng ---
+                def style_rating(val):
+                    color = ''
+                    if val == 'Outperform': color = '#D4EDDA'
+                    elif val == 'Underperform': color = '#F8D7DA'
+                    return f'background-color: {color}'
+
+                def style_win_rate(val):
+                    color = ''
+                    if isinstance(val, str) and '%' in val:
+                        try:
+                            num_val = float(val.strip('%'))
+                            if num_val > 50: color = '#D4EDDA'
+                            elif num_val < 50: color = '#F8D7DA'
+                        except (ValueError, TypeError): pass
+                    return f'background-color: {color}'
+
+                # **FIX:** Hàm áp dụng style căn lề và màu sắc
+                def apply_styles(df):
+                    numeric_cols = ['Hiệu suất CP (6T)', 'Hiệu suất VNINDEX (6T)', 'vs VNINDEX (6T)']
+                    styler = df.style.map(style_rating, subset=['Rating'])
+                    
+                    # Tạo dictionary định dạng
+                    format_dict = {}
+                    for col in numeric_cols:
+                        if col in df.columns:
+                            format_dict[col] = '{: >}' # Căn phải
+                    
+                    styler = styler.set_properties(**{'text-align': 'right'}, subset=numeric_cols)
+                    return styler
+
                 if not all(df.empty for df in [df_list1, df_list2, df_list3, df_list4]):
                     st.success("Xử lý file thành công! Dưới đây là kết quả:")
-                    st.header("Kết quả lọc")
+                    
+                    st.header("📊 Bảng tổng hợp Win Rate")
+                    summary_df = calculate_win_rate_summary(df_list1, df_list2, df_list3, df_list4)
+                    win_rate_cols = summary_df.columns.drop('Win Rate')
+                    summary_styler = summary_df.style.apply(lambda x: x.map(style_win_rate), subset=win_rate_cols)
+                    st.dataframe(summary_styler, use_container_width=True, hide_index=True)
 
+                    st.header("Kết quả lọc chi tiết")
                     col1, col2 = st.columns(2)
                     with col1:
                         st.subheader("📉 OUTPERFORM sang MARKET-PERFORM")
-                        st.dataframe(df_list1, use_container_width=True, hide_index=True)
-                        st.subheader("✅ Khuyến nghị MUA (BUY)")
-                        st.dataframe(df_list3, use_container_width=True, hide_index=True)
+                        st.dataframe(apply_styles(df_list1), use_container_width=True, hide_index=True)
+                        st.subheader("✅ Khuyến nghị BUY")
+                        st.dataframe(apply_styles(df_list3), use_container_width=True, hide_index=True)
                     with col2:
                         st.subheader("🚀 MARKET-PERFORM sang OUTPERFORM")
-                        st.dataframe(df_list2, use_container_width=True, hide_index=True)
-                        st.subheader("⚠️ Khuyến nghị KÉM HIỆU QUẢ (UNDER-PERFORM)")
-                        st.dataframe(df_list4, use_container_width=True, hide_index=True)
+                        st.dataframe(apply_styles(df_list2), use_container_width=True, hide_index=True)
+                        st.subheader("⚠️ Khuyến nghị UNDER-PERFORM")
+                        st.dataframe(apply_styles(df_list4), use_container_width=True, hide_index=True)
 
                     st.divider()
                     st.header("📥 Tải xuống kết quả")
                     dfs_for_export = {
+                        "Thong_ke_Win_Rate": summary_df,
                         "Out_sang_MarketPerform": df_list1,
                         "MarketPerform_sang_Out": df_list2,
                         "Khuyen_nghi_BUY": df_list3,
@@ -205,5 +313,4 @@ st.set_page_config(layout="wide", page_title="Bộ lọc Cổ phiếu")
 st.title("📈 Bộ lọc Cổ phiếu theo Khuyến nghị và Hiệu suất")
 
 
-# Chạy phân tích tự động
 run_analysis(HARCODED_GDRIVE_URL)
