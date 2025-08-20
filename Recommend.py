@@ -146,6 +146,12 @@ def process_stock_data(df_rec, df_price):
     under_data = [{'Cổ phiếu': stock, 'Ngày khuyến nghị': date.strftime('%Y-%m-%d')} for stock in df_rec.columns for date in df_rec.index[df_rec[stock] == 'UNDER-PERFORM']]
     df_list4 = pd.DataFrame(under_data) if under_data else pd.DataFrame(columns=['Cổ phiếu', 'Ngày khuyến nghị'])
 
+    # **FIX:** Sắp xếp các bảng theo ngày giảm dần
+    if not df_list1.empty: df_list1 = df_list1.sort_values(by='Ngày thay đổi', ascending=False)
+    if not df_list2.empty: df_list2 = df_list2.sort_values(by='Ngày thay đổi', ascending=False)
+    if not df_list3.empty: df_list3 = df_list3.sort_values(by='Ngày khuyến nghị', ascending=False)
+    if not df_list4.empty: df_list4 = df_list4.sort_values(by='Ngày khuyến nghị', ascending=False)
+
     df_list1 = add_performance_cols(df_list1, prices_pivot, 'Ngày thay đổi')
     df_list2 = add_performance_cols(df_list2, prices_pivot, 'Ngày thay đổi')
     df_list3 = add_performance_cols(df_list3, prices_pivot, 'Ngày khuyến nghị')
@@ -191,7 +197,6 @@ def calculate_win_rate_summary(df1, df2, df3, df4):
                 if total_cases > 0:
                     win_cases = len(year_df[year_df['Rating'] == 'Outperform'])
                     win_rate = win_cases / total_cases
-                    # **FIX:** Cập nhật định dạng hiển thị
                     win_rates.append(f"{win_rate:.2%} ({win_cases}/{total_cases})")
                 else:
                     win_rates.append('N/A')
@@ -200,7 +205,6 @@ def calculate_win_rate_summary(df1, df2, df3, df4):
             if total_all_time > 0:
                 win_all_time = len(df_filtered[df_filtered['Rating'] == 'Outperform'])
                 total_win_rate = win_all_time / total_all_time
-                # **FIX:** Cập nhật định dạng hiển thị cho dòng Total
                 win_rates.append(f"{total_win_rate:.2%} ({win_all_time}/{total_all_time})")
             else:
                 win_rates.append('N/A')
@@ -245,7 +249,6 @@ def run_analysis(gdrive_url):
                     color = ''
                     if isinstance(val, str) and '%' in val:
                         try:
-                            # **FIX:** Tách chuỗi để lấy giá trị %
                             percent_str = val.split(' ')[0]
                             num_val = float(percent_str.strip('%'))
                             if num_val > 50: color = '#D4EDDA'
@@ -279,12 +282,12 @@ def run_analysis(gdrive_url):
                     with col1:
                         st.subheader("📉 OUTPERFORM sang MARKET-PERFORM")
                         st.dataframe(apply_styles(df_list1), use_container_width=True, hide_index=True)
-                        st.subheader("✅ Khuyến nghị BUY")
+                        st.subheader("✅ Khuyến nghị MUA (BUY)")
                         st.dataframe(apply_styles(df_list3), use_container_width=True, hide_index=True)
                     with col2:
                         st.subheader("🚀 MARKET-PERFORM sang OUTPERFORM")
                         st.dataframe(apply_styles(df_list2), use_container_width=True, hide_index=True)
-                        st.subheader("⚠️ Khuyến nghị UNDER-PERFORM")
+                        st.subheader("⚠️ Khuyến nghị KÉM HIỆU QUẢ (UNDER-PERFORM)")
                         st.dataframe(apply_styles(df_list4), use_container_width=True, hide_index=True)
 
                     st.divider()
