@@ -191,7 +191,8 @@ def calculate_win_rate_summary(df1, df2, df3, df4):
                 if total_cases > 0:
                     win_cases = len(year_df[year_df['Rating'] == 'Outperform'])
                     win_rate = win_cases / total_cases
-                    win_rates.append(f"{win_rate:.2%}")
+                    # **FIX:** Cập nhật định dạng hiển thị
+                    win_rates.append(f"{win_rate:.2%} ({win_cases}/{total_cases})")
                 else:
                     win_rates.append('N/A')
             
@@ -199,7 +200,8 @@ def calculate_win_rate_summary(df1, df2, df3, df4):
             if total_all_time > 0:
                 win_all_time = len(df_filtered[df_filtered['Rating'] == 'Outperform'])
                 total_win_rate = win_all_time / total_all_time
-                win_rates.append(f"{total_win_rate:.2%}")
+                # **FIX:** Cập nhật định dạng hiển thị cho dòng Total
+                win_rates.append(f"{total_win_rate:.2%} ({win_all_time}/{total_all_time})")
             else:
                 win_rates.append('N/A')
             summary_data[col_name] = win_rates
@@ -243,22 +245,22 @@ def run_analysis(gdrive_url):
                     color = ''
                     if isinstance(val, str) and '%' in val:
                         try:
-                            num_val = float(val.strip('%'))
+                            # **FIX:** Tách chuỗi để lấy giá trị %
+                            percent_str = val.split(' ')[0]
+                            num_val = float(percent_str.strip('%'))
                             if num_val > 50: color = '#D4EDDA'
                             elif num_val < 50: color = '#F8D7DA'
                         except (ValueError, TypeError): pass
                     return f'background-color: {color}'
 
-                # **FIX:** Hàm áp dụng style căn lề và màu sắc
                 def apply_styles(df):
                     numeric_cols = ['Hiệu suất CP (6T)', 'Hiệu suất VNINDEX (6T)', 'vs VNINDEX (6T)']
                     styler = df.style.map(style_rating, subset=['Rating'])
                     
-                    # Tạo dictionary định dạng
                     format_dict = {}
                     for col in numeric_cols:
                         if col in df.columns:
-                            format_dict[col] = '{: >}' # Căn phải
+                            format_dict[col] = '{: >}'
                     
                     styler = styler.set_properties(**{'text-align': 'right'}, subset=numeric_cols)
                     return styler
