@@ -282,12 +282,12 @@ def run_analysis(gdrive_url):
                     with col1:
                         st.subheader("📉 OUTPERFORM sang MARKET-PERFORM")
                         st.dataframe(apply_styles(df_list1), use_container_width=True, hide_index=True)
-                        st.subheader("✅ Khuyến nghị MUA (BUY)")
+                        st.subheader("✅ Khuyến nghị BUY")
                         st.dataframe(apply_styles(df_list3), use_container_width=True, hide_index=True)
                     with col2:
                         st.subheader("🚀 MARKET-PERFORM sang OUTPERFORM")
                         st.dataframe(apply_styles(df_list2), use_container_width=True, hide_index=True)
-                        st.subheader("⚠️ Khuyến nghị KÉM HIỆU QUẢ (UNDER-PERFORM)")
+                        st.subheader("⚠️ Khuyến nghị UNDER-PERFORM")
                         st.dataframe(apply_styles(df_list4), use_container_width=True, hide_index=True)
 
                     st.divider()
